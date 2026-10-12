@@ -74,6 +74,10 @@ namespace RadminAuto
                 return ExitNoLoginDialog;
             }
             Log("Login dialog found: \"" + dlg.Title + "\" (user field: " + (dlg.UserEdit != IntPtr.Zero ? "yes" : "no") + ")");
+            if (verbose)
+                dlg.DumpControls();
+            // Give the dialog a moment to finish initialising before we touch it.
+            Thread.Sleep(300);
 
             if (!dlg.Fill(opt.User, opt.Password, opt.Domain))
             {
@@ -87,11 +91,9 @@ namespace RadminAuto
             }
 
             existing.Add(dlg.Handle);
-            dlg.Submit();
-
-            if (!WaitUntilGone(dlg.Handle, 10000))
+            if (!dlg.Submit())
             {
-                Console.Error.WriteLine("Error: login dialog is still open after pressing OK.");
+                Console.Error.WriteLine("Error: login dialog is still open after pressing OK. Run with -v and send the output.");
                 return ExitLoginRejected;
             }
             // A wrong password makes Radmin ask again with a fresh dialog.
@@ -128,7 +130,7 @@ namespace RadminAuto
             }
         }
 
-        static bool WaitUntilGone(IntPtr hwnd, int timeoutMs)
+        internal static bool WaitUntilGone(IntPtr hwnd, int timeoutMs)
         {
             Stopwatch sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < timeoutMs)
@@ -421,13 +423,90 @@ Exit codes:
             return Native.SetText(PasswordEdit, password ?? "");
         }
 
-        public void Submit()
+        // Presses OK, trying progressively more forceful ways until the dialog closes.
+        public bool Submit()
         {
-            // Send BN_CLICKED for IDOK to the dialog: the same thing pressing the OK button does,
-            // but it does not need the window to be in the foreground.
-            IntPtr ok = Native.GetDlgItem(Handle, Native.IDOK);
-            IntPtr wParam = (IntPtr)((Native.BN_CLICKED << 16) | Native.IDOK);
-            Native.PostMessage(Handle, Native.WM_COMMAND, wParam, ok);
+            IntPtr ok = FindOkButton();
+            int okId = ok != IntPtr.Zero ? Native.GetDlgCtrlID(ok) : Native.IDOK;
+            Program.Log(ok != IntPtr.Zero
+                ? "OK button: id=" + okId + " text=\"" + Native.TextOf(ok) + "\""
+                : "OK button not found, using IDOK");
+
+            Native.ForceForeground(Handle);
+
+            if (ok != IntPtr.Zero)
+            {
+                Program.Log("Submit: BM_CLICK on OK button");
+                Native.PostMessage(ok, Native.BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                if (Program.WaitUntilGone(Handle, 3000))
+                    return true;
+            }
+
+            Program.Log("Submit: WM_COMMAND id=" + okId);
+            Native.PostMessage(Handle, Native.WM_COMMAND, (IntPtr)((Native.BN_CLICKED << 16) | (okId & 0xFFFF)), ok);
+            if (Program.WaitUntilGone(Handle, 3000))
+                return true;
+
+            // The dialog manager turns Enter in an edit box into a click on the default button.
+            Program.Log("Submit: Enter key posted to the password box");
+            Native.PostMessage(PasswordEdit, Native.WM_KEYDOWN, (IntPtr)Native.VK_RETURN, (IntPtr)0x001C0001);
+            Native.PostMessage(PasswordEdit, Native.WM_KEYUP, (IntPtr)Native.VK_RETURN, (IntPtr)unchecked((int)0xC01C0001));
+            if (Program.WaitUntilGone(Handle, 3000))
+                return true;
+
+            // Last resort: a real key press, only if the dialog really has the keyboard focus.
+            Native.ForceForeground(Handle);
+            if (Native.GetForegroundWindow() == Handle)
+            {
+                Program.Log("Submit: real Enter key press");
+                Native.PressKey(Native.VK_RETURN);
+                if (Program.WaitUntilGone(Handle, 5000))
+                    return true;
+            }
+            else
+            {
+                Program.Log("Submit: could not bring the dialog to the foreground");
+            }
+            return false;
+        }
+
+        IntPtr FindOkButton()
+        {
+            IntPtr byId = IntPtr.Zero, byText = IntPtr.Zero, byDefault = IntPtr.Zero;
+            Native.EnumChildWindows(Handle, delegate (IntPtr child, IntPtr lParam)
+            {
+                if (!Native.ClassNameOf(child).Equals("Button", StringComparison.OrdinalIgnoreCase)
+                    || !Native.IsWindowVisible(child) || !Native.IsWindowEnabled(child))
+                    return true;
+                int kind = Native.GetWindowLong(child, Native.GWL_STYLE) & Native.BS_TYPEMASK;
+                if (kind != Native.BS_PUSHBUTTON && kind != Native.BS_DEFPUSHBUTTON)
+                    return true;
+                if (byId == IntPtr.Zero && Native.GetDlgCtrlID(child) == Native.IDOK)
+                    byId = child;
+                if (byText == IntPtr.Zero && Native.TextOf(child).Replace("&", "").Trim()
+                        .Equals("OK", StringComparison.OrdinalIgnoreCase))
+                    byText = child;
+                if (byDefault == IntPtr.Zero && kind == Native.BS_DEFPUSHBUTTON)
+                    byDefault = child;
+                return true;
+            }, IntPtr.Zero);
+            if (byId != IntPtr.Zero) return byId;
+            if (byText != IntPtr.Zero) return byText;
+            return byDefault;
+        }
+
+        public void DumpControls()
+        {
+            Native.EnumChildWindows(Handle, delegate (IntPtr child, IntPtr lParam)
+            {
+                string cls = Native.ClassNameOf(child);
+                bool isEdit = cls.Equals("Edit", StringComparison.OrdinalIgnoreCase);
+                Program.Log(string.Format("  control class={0} id={1} style=0x{2:X8} visible={3} enabled={4} text=\"{5}\"",
+                    cls, Native.GetDlgCtrlID(child), Native.GetWindowLong(child, Native.GWL_STYLE),
+                    Native.IsWindowVisible(child), Native.IsWindowEnabled(child),
+                    isEdit ? "" : Native.TextOf(child)));
+                return true;
+            }, IntPtr.Zero);
         }
     }
 
@@ -437,6 +516,16 @@ Exit codes:
         public const int ES_PASSWORD = 0x20;
         public const uint WM_SETTEXT = 0x000C;
         public const uint WM_COMMAND = 0x0111;
+        public const uint WM_KEYDOWN = 0x0100;
+        public const uint WM_KEYUP = 0x0101;
+        public const uint BM_CLICK = 0x00F5;
+        public const int BS_TYPEMASK = 0x0F;
+        public const int BS_PUSHBUTTON = 0x00;
+        public const int BS_DEFPUSHBUTTON = 0x01;
+        public const int VK_RETURN = 0x0D;
+        const int VK_MENU = 0x12;
+        const uint KEYEVENTF_KEYUP = 0x0002;
+        const int SW_RESTORE = 9;
         public const int IDOK = 1;
         public const int BN_CLICKED = 0;
         const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -465,7 +554,31 @@ Exit codes:
         public static extern int GetWindowLong(IntPtr hwnd, int index);
 
         [DllImport("user32.dll")]
-        public static extern IntPtr GetDlgItem(IntPtr dialog, int id);
+        public static extern int GetDlgCtrlID(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        static extern bool BringWindowToTop(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        static extern bool IsIconic(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hwnd, int cmd);
+
+        [DllImport("user32.dll")]
+        static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
 
         [DllImport("user32.dll")]
         public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -492,6 +605,40 @@ Exit codes:
             StringBuilder sb = new StringBuilder(512);
             GetWindowText(hwnd, sb, sb.Capacity);
             return sb.ToString();
+        }
+
+        // Windows only lets the foreground process change the foreground window; attaching to the
+        // current foreground thread's input queue (plus an Alt tap) lifts that restriction.
+        public static void ForceForeground(IntPtr hwnd)
+        {
+            if (IsIconic(hwnd))
+                ShowWindow(hwnd, SW_RESTORE);
+            if (GetForegroundWindow() == hwnd)
+                return;
+
+            uint pid;
+            uint fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+            uint me = GetCurrentThreadId();
+            bool attached = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
+            try
+            {
+                keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
+                keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                BringWindowToTop(hwnd);
+                SetForegroundWindow(hwnd);
+            }
+            finally
+            {
+                if (attached)
+                    AttachThreadInput(me, fgThread, false);
+            }
+            Thread.Sleep(150);
+        }
+
+        public static void PressKey(int vk)
+        {
+            keybd_event((byte)vk, 0, 0, UIntPtr.Zero);
+            keybd_event((byte)vk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
 
         // WM_SETTEXT is marshalled across processes, so it works on another app's edit boxes.

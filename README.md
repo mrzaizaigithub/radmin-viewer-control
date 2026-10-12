@@ -6,7 +6,7 @@ Radmin Viewer không có tham số dòng lệnh cho user/mật khẩu (chỉ có
 
 1. Chạy `Radmin.exe /connect:<ip>:<port>` (kèm `/fullscreen`, `/noinput`... nếu có yêu cầu).
 2. Chờ hộp thoại đăng nhập của Radmin hiện ra. Hộp thoại được nhận diện là cửa sổ của tiến trình `Radmin.exe` có ô mật khẩu.
-3. Ghi user/mật khẩu vào các ô (dùng `WM_SETTEXT`) rồi bấm OK.
+3. Ghi user/mật khẩu vào các ô (dùng `WM_SETTEXT`) rồi bấm OK. Nếu cách bấm trước không làm hộp thoại đóng thì thử cách tiếp theo: click nút OK (`BM_CLICK`), gửi lệnh OK cho hộp thoại, gửi Enter vào ô mật khẩu, cuối cùng đưa hộp thoại lên trước và nhấn Enter thật.
 4. Kiểm tra hộp thoại đã đóng và Radmin không hỏi lại. Nếu hỏi lại thì coi như sai mật khẩu.
 
 Ứng dụng không phụ thuộc ngôn ngữ giao diện của Radmin và không cần cửa sổ ở trạng thái active, vì nó không giả lập gõ phím.
@@ -86,6 +86,9 @@ File được tạo ra là `bin\RadminAuto.exe`.
 **Cách 2, GitHub Actions:** mỗi lần push, workflow `build` sẽ build trên Windows. Bạn tải `RadminAuto.exe` ở mục *Artifacts* của lần chạy đó.
 
 ## Lưu ý
+
+- `--no-submit` chỉ điền, **không** bấm OK. Muốn tự đăng nhập thì bỏ cờ này.
+- Khi có lỗi, chạy với `-v`. Chương trình sẽ in danh sách control trong hộp thoại và từng cách bấm OK đã thử. Gửi phần log này để chỉnh cho đúng bản Radmin của bạn.
 
 - Nếu Radmin Viewer chạy bằng quyền Administrator thì `RadminAuto.exe` cũng phải chạy bằng quyền Administrator. Windows chặn tiến trình quyền thấp gửi thông điệp vào cửa sổ quyền cao.
 - Mật khẩu truyền qua dòng lệnh có thể bị tiến trình khác trên máy đọc được. Nên dùng `--pass-env` hoặc tự lấy mật khẩu từ nơi lưu an toàn rồi mới gọi.
