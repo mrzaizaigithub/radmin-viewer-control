@@ -4,6 +4,9 @@
 // wrapper starts "Radmin.exe /connect:host:port", waits for the security
 // dialog, writes the credentials into its edit boxes and presses OK.
 //
+// It can also be started from a web page through a "radminauto://" link once
+// "RadminAuto --register" has registered that URL scheme for the current user.
+//
 // Written in C# 5 so it builds with the csc.exe that ships with .NET Framework 4.x.
 
 using System;
@@ -13,6 +16,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32;
 
 namespace RadminAuto
 {
@@ -26,19 +30,44 @@ namespace RadminAuto
         const int ExitFillFailed = 5;
 
         static bool verbose;
+        // Started from a radminauto:// link: there is nobody watching a console, so errors go to a message box.
+        static bool urlMode;
 
         static int Main(string[] args)
         {
+            if (args.Length == 1 && args[0].Equals("--register", StringComparison.OrdinalIgnoreCase))
+                return UrlProtocol.Register();
+            if (args.Length == 1 && args[0].Equals("--unregister", StringComparison.OrdinalIgnoreCase))
+                return UrlProtocol.Unregister();
+
             Options opt;
-            try
+            string url = UrlProtocol.FindUrlArgument(args);
+            if (url != null)
             {
-                opt = Options.Parse(args);
+                // Only the link itself is trusted; any other argument could have been smuggled in by the link.
+                urlMode = true;
+                Native.HideOwnConsole();
+                try
+                {
+                    opt = Options.FromUrl(url);
+                }
+                catch (ArgumentException ex)
+                {
+                    return Fail(ExitUsage, "Invalid link: " + ex.Message);
+                }
             }
-            catch (ArgumentException ex)
+            else
             {
-                Console.Error.WriteLine("Error: " + ex.Message);
-                Console.Error.WriteLine("Run 'RadminAuto --help' for usage.");
-                return ExitUsage;
+                try
+                {
+                    opt = Options.Parse(args);
+                }
+                catch (ArgumentException ex)
+                {
+                    Console.Error.WriteLine("Error: " + ex.Message);
+                    Console.Error.WriteLine("Run 'RadminAuto --help' for usage.");
+                    return ExitUsage;
+                }
             }
             if (opt.ShowHelp)
             {
@@ -50,8 +79,7 @@ namespace RadminAuto
             string radmin = FindRadmin(opt.RadminPath);
             if (radmin == null)
             {
-                Console.Error.WriteLine("Error: Radmin.exe not found. Use --radmin <path> or set RADMIN_PATH.");
-                return ExitRadminNotFound;
+                return Fail(ExitRadminNotFound, "Radmin.exe not found. Use --radmin <path> or set RADMIN_PATH.");
             }
 
             // Remember login dialogs that already exist so we never type into someone else's.
@@ -69,9 +97,8 @@ namespace RadminAuto
             LoginDialog dlg = WaitForNewDialog(existing, opt.Host, opt.TimeoutSeconds * 1000);
             if (dlg == null)
             {
-                Console.Error.WriteLine("Error: login dialog did not appear within " + opt.TimeoutSeconds +
-                    "s (host unreachable, or credentials already saved in Radmin?).");
-                return ExitNoLoginDialog;
+                return Fail(ExitNoLoginDialog, "Radmin login dialog for " + opt.Host + " did not appear within " +
+                    opt.TimeoutSeconds + "s (host unreachable, or credentials already saved in Radmin?).");
             }
             Log("Login dialog found: \"" + dlg.Title + "\" (user field: " + (dlg.UserEdit != IntPtr.Zero ? "yes" : "no") + ")");
             if (verbose)
@@ -81,8 +108,7 @@ namespace RadminAuto
 
             if (!dlg.Fill(opt.User, opt.Password, opt.Domain))
             {
-                Console.Error.WriteLine("Error: could not write credentials into the login dialog.");
-                return ExitFillFailed;
+                return Fail(ExitFillFailed, "Could not write credentials into the Radmin login dialog.");
             }
             if (opt.NoSubmit)
             {
@@ -93,18 +119,24 @@ namespace RadminAuto
             existing.Add(dlg.Handle);
             if (!dlg.Submit())
             {
-                Console.Error.WriteLine("Error: login dialog is still open after pressing OK. Run with -v and send the output.");
-                return ExitLoginRejected;
+                return Fail(ExitLoginRejected, "Radmin login dialog is still open after pressing OK. Run with -v and send the output.");
             }
             // A wrong password makes Radmin ask again with a fresh dialog.
             if (WaitForNewDialog(existing, opt.Host, 2000) != null)
             {
-                Console.Error.WriteLine("Error: Radmin asked for credentials again (wrong user name or password?).");
-                return ExitLoginRejected;
+                return Fail(ExitLoginRejected, "Radmin asked for credentials again for " + opt.Host + " (wrong user name or password?).");
             }
 
             Console.WriteLine("Logged in to " + opt.Host + ":" + opt.Port);
             return ExitOk;
+        }
+
+        static int Fail(int exitCode, string message)
+        {
+            Console.Error.WriteLine("Error: " + message);
+            if (urlMode)
+                Native.ShowError(message);
+            return exitCode;
         }
 
         static LoginDialog WaitForNewDialog(HashSet<IntPtr> exclude, string host, int timeoutMs)
@@ -201,6 +233,8 @@ namespace RadminAuto
 Usage:
   RadminAuto <host[:port]> <user> <password> [options]
   RadminAuto --host <host> [--port <port>] --user <user> --pass <password> [options]
+  RadminAuto ""radminauto://connect?host=<host>&port=<port>&user=<user>&pass=<password>""
+  RadminAuto --register | --unregister
 
 Options:
   --host <host>        IP or host name of the Radmin Server
@@ -218,6 +252,11 @@ Options:
   -v, --verbose        print what is happening
   -h, --help           show this help
   -- <args...>         pass the remaining arguments to Radmin.exe unchanged
+  --register           make radminauto:// links open this program (current user)
+  --unregister         remove the radminauto:// link handler
+
+Link parameters: host (or ip), port, user, pass (or password), domain,
+through, fullscreen=1, viewonly=1. URL-encode values (encodeURIComponent).
 
 Exit codes:
   0 ok, 1 bad arguments, 2 Radmin.exe not found, 3 login dialog not shown,
@@ -302,18 +341,100 @@ Exit codes:
             if (positional.Count >= 2) o.User = positional[1];
             if (positional.Count >= 3) o.Password = positional[2];
 
-            if (string.IsNullOrEmpty(o.Host))
+            o.Finish(portGiven);
+            return o;
+        }
+
+        // radminauto://connect?host=1.2.3.4&port=4899&user=u&pass=p&fullscreen=1
+        // Only connection settings are read from a link: nothing in it can choose which program runs.
+        public static Options FromUrl(string url)
+        {
+            Options o = new Options();
+            bool portGiven = false;
+
+            string rest = url.Substring(url.IndexOf(':') + 1).TrimStart('/');
+            int hash = rest.IndexOf('#');
+            if (hash >= 0)
+                rest = rest.Substring(0, hash);
+            int q = rest.IndexOf('?');
+            string authority = (q >= 0 ? rest.Substring(0, q) : rest).TrimEnd('/');
+            string query = q >= 0 ? rest.Substring(q + 1) : "";
+
+            foreach (string pair in query.Split('&'))
+            {
+                if (pair.Length == 0)
+                    continue;
+                int eq = pair.IndexOf('=');
+                string key = Uri.UnescapeDataString(eq < 0 ? pair : pair.Substring(0, eq)).ToLowerInvariant();
+                string val = eq < 0 ? "" : Uri.UnescapeDataString(pair.Substring(eq + 1));
+                switch (key)
+                {
+                    case "host": case "ip": o.Host = val; break;
+                    case "port": o.Port = ParsePort(val); portGiven = true; break;
+                    case "user": case "u": o.User = val; break;
+                    case "pass": case "password": case "p": o.Password = val; break;
+                    case "domain": o.Domain = val; break;
+                    case "through": o.Through = val.Length > 0 ? val : null; break;
+                    case "fullscreen": o.FullScreen = IsTrue(val); break;
+                    case "viewonly": o.ViewOnly = IsTrue(val); break;
+                    // Anything else (radmin path, timeout, extra Radmin switches...) is deliberately ignored.
+                }
+            }
+
+            // Also accept radminauto://1.2.3.4:4899/?user=...
+            if (string.IsNullOrEmpty(o.Host) && authority.Length > 0
+                && !authority.Equals("connect", StringComparison.OrdinalIgnoreCase))
+                o.Host = Uri.UnescapeDataString(authority);
+
+            o.Finish(portGiven);
+            return o;
+        }
+
+        void Finish(bool portGiven)
+        {
+            if (string.IsNullOrEmpty(Host))
                 throw new ArgumentException("missing host");
 
-            // Accept "host:port" unless it looks like an IPv6 address.
-            int colon = o.Host.LastIndexOf(':');
-            if (colon > 0 && o.Host.IndexOf(':') == colon)
+            int colon = Host.LastIndexOf(':');
+            if (colon > 0)
             {
-                int p = ParsePort(o.Host.Substring(colon + 1));
-                if (!portGiven) o.Port = p;
-                o.Host = o.Host.Substring(0, colon);
+                int p = ParsePort(Host.Substring(colon + 1));
+                if (!portGiven) Port = p;
+                Host = Host.Substring(0, colon);
             }
-            return o;
+
+            // Host and through end up on Radmin's command line, so they must not contain spaces,
+            // quotes or slashes that would add extra Radmin switches.
+            if (!IsHostName(Host))
+                throw new ArgumentException("invalid host '" + Host + "'");
+            if (Through != null)
+            {
+                int tc = Through.LastIndexOf(':');
+                string th = tc > 0 ? Through.Substring(0, tc) : Through;
+                if (tc > 0)
+                    ParsePort(Through.Substring(tc + 1));
+                if (!IsHostName(th))
+                    throw new ArgumentException("invalid through host '" + Through + "'");
+            }
+        }
+
+        static bool IsHostName(string s)
+        {
+            if (s.Length == 0 || s.Length > 253)
+                return false;
+            foreach (char c in s)
+            {
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                      || c == '.' || c == '-' || c == '_'))
+                    return false;
+            }
+            return true;
+        }
+
+        static bool IsTrue(string v)
+        {
+            v = v.Trim().ToLowerInvariant();
+            return v == "" || v == "1" || v == "true" || v == "yes" || v == "on";
         }
 
         static string Value(string[] args, ref int i)
@@ -329,6 +450,47 @@ Exit codes:
             if (!int.TryParse(s, out p) || p < 1 || p > 65535)
                 throw new ArgumentException("invalid port '" + s + "'");
             return p;
+        }
+    }
+
+    internal static class UrlProtocol
+    {
+        const string Scheme = "radminauto";
+        const string KeyPath = @"Software\Classes\" + Scheme;
+
+        public static string FindUrlArgument(string[] args)
+        {
+            foreach (string a in args)
+            {
+                if (a.StartsWith(Scheme + ":", StringComparison.OrdinalIgnoreCase))
+                    return a;
+            }
+            return null;
+        }
+
+        // Per-user registration (HKCU), so no administrator rights are needed.
+        public static int Register()
+        {
+            string exe = Process.GetCurrentProcess().MainModule.FileName;
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(KeyPath))
+            {
+                key.SetValue("", "URL:RadminAuto Protocol");
+                key.SetValue("URL Protocol", "");
+                using (RegistryKey icon = key.CreateSubKey("DefaultIcon"))
+                    icon.SetValue("", "\"" + exe + "\",0");
+                using (RegistryKey cmd = key.CreateSubKey(@"shell\open\command"))
+                    cmd.SetValue("", "\"" + exe + "\" --url \"%1\"");
+            }
+            Console.WriteLine(Scheme + ":// links now open \"" + exe + "\".");
+            Console.WriteLine("Run --register again if you move this file.");
+            return 0;
+        }
+
+        public static int Unregister()
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(KeyPath, false);
+            Console.WriteLine(Scheme + ":// link handler removed.");
+            return 0;
         }
     }
 
@@ -526,6 +688,10 @@ Exit codes:
         const int VK_MENU = 0x12;
         const uint KEYEVENTF_KEYUP = 0x0002;
         const int SW_RESTORE = 9;
+        const int SW_HIDE = 0;
+        const uint MB_ICONERROR = 0x10;
+        const uint MB_SETFOREGROUND = 0x10000;
+        const uint MB_TOPMOST = 0x40000;
         public const int IDOK = 1;
         public const int BN_CLICKED = 0;
         const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -555,6 +721,15 @@ Exit codes:
 
         [DllImport("user32.dll")]
         public static extern int GetDlgCtrlID(IntPtr hwnd);
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetConsoleProcessList(uint[] processIds, uint count);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int MessageBox(IntPtr owner, string text, string caption, uint type);
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
@@ -633,6 +808,20 @@ Exit codes:
                     AttachThreadInput(me, fgThread, false);
             }
             Thread.Sleep(150);
+        }
+
+        // Hides the console window Windows creates when a link starts us, but never the
+        // console of a cmd window we were started from (that one has other processes attached).
+        public static void HideOwnConsole()
+        {
+            IntPtr console = GetConsoleWindow();
+            if (console != IntPtr.Zero && GetConsoleProcessList(new uint[4], 4) == 1)
+                ShowWindow(console, SW_HIDE);
+        }
+
+        public static void ShowError(string message)
+        {
+            MessageBox(IntPtr.Zero, message, "RadminAuto", MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
         }
 
         public static void PressKey(int vk)

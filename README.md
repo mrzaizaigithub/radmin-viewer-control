@@ -73,6 +73,61 @@ r = subprocess.run(["RadminAuto.exe", "192.168.1.10", "admin", "MatKhau123"])
 print("OK" if r.returncode == 0 else f"Loi {r.returncode}")
 ```
 
+## Mở bằng link trên web (`radminauto://`)
+
+Bấm một link trên trang web, RadminAuto sẽ mở Radmin và tự đăng nhập.
+
+**1. Đăng ký, chạy một lần trên mỗi máy** (không cần quyền admin):
+
+```bat
+RadminAuto.exe --register
+```
+
+Lệnh này ghi vào `HKCU\Software\Classes\radminauto` để link `radminauto://...` mở bằng file `RadminAuto.exe` đó. Nếu chuyển file sang thư mục khác thì chạy `--register` lại. Muốn gỡ thì chạy `RadminAuto.exe --unregister`.
+
+**2. Định dạng link:**
+
+```
+radminauto://connect?host=192.168.11.242&port=4899&user=remote&pass=remote
+radminauto://connect?host=192.168.11.242&user=remote&pass=remote&fullscreen=1&viewonly=1
+```
+
+| Tham số | Ý nghĩa |
+|---|---|
+| `host` (hoặc `ip`) | IP / tên máy, có thể kèm port: `192.168.11.242:4899` |
+| `port` | Port (mặc định 4899) |
+| `user`, `pass` | Tên đăng nhập, mật khẩu |
+| `domain`, `through` | Giống tham số dòng lệnh cùng tên |
+| `fullscreen=1`, `viewonly=1` | Toàn màn hình / chỉ xem |
+
+Giá trị phải được **mã hóa URL**: dùng `encodeURIComponent` trong JavaScript, `Uri.EscapeDataString` trong C#. Không mã hóa thì mật khẩu có ký tự như `&`, `#`, `%`, `?` sẽ bị cắt sai.
+
+**3. Trên ASP.NET Core (Razor):**
+
+```cshtml
+@{
+    string link = "radminauto://connect"
+        + "?host=" + Uri.EscapeDataString(Model.Host)
+        + "&port=" + Model.Port
+        + "&user=" + Uri.EscapeDataString(Model.User)
+        + "&pass=" + Uri.EscapeDataString(Model.Password);
+}
+<a class="btn btn-primary" href="@link">Mở Radmin</a>
+```
+
+Không cần code gì thêm phía server. Khi người dùng bấm, trình duyệt hỏi *"Mở RadminAuto?"* (tick "Luôn cho phép" để lần sau không hỏi). Muốn bỏ hẳn câu hỏi này cho cả công ty, quản trị viên đặt policy `AutoLaunchProtocolsFromOrigins` của Chrome/Edge, ví dụ `[{"protocol":"radminauto","allowed_origins":["http://intranet.congty"]}]`.
+
+Để thử mà chưa có web, mở file `samples/link-test.html` trong trình duyệt, nhập thông tin rồi bấm nút. Cũng có thể thử thẳng từ cmd:
+
+```bat
+RadminAuto.exe "radminauto://connect?host=192.168.11.242&user=remote&pass=remote"
+```
+
+**Khi mở bằng link:**
+- Cửa sổ console đen chỉ hiện chớp một chút rồi ẩn. Nếu lỗi (sai mật khẩu, không kết nối được...), chương trình hiện hộp thông báo.
+- Link chỉ được phép chọn máy, user, mật khẩu, port và chế độ xem. Các tham số `--radmin`, `--timeout`, `-- ...` bị bỏ qua, host chỉ nhận chữ, số, `.`, `-`, `_`. Như vậy một trang web lạ cũng không thể dùng link `radminauto://` để chạy chương trình khác trên máy.
+- Mật khẩu nằm trong link nên sẽ có trong mã HTML của trang và lịch sử trình duyệt. Chỉ dùng trong mạng nội bộ.
+
 ## Build
 
 **Cách 1, trên Windows** (không cần cài thêm gì, dùng `csc.exe` có sẵn của .NET Framework 4.x):

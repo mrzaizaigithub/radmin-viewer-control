@@ -16,6 +16,14 @@ jobs:
       - name: Smoke test
         shell: cmd
         run: bin\RadminAuto.exe --help
+      - name: Register / unregister link handler
+        shell: cmd
+        run: |
+          bin\RadminAuto.exe --register || exit /b 1
+          reg query "HKCU\Software\Classes\radminauto\shell\open\command" || exit /b 1
+          bin\RadminAuto.exe --unregister || exit /b 1
+          reg query "HKCU\Software\Classes\radminauto" && exit /b 1
+          exit /b 0
       - uses: actions/upload-artifact@v4
         with:
           name: RadminAuto
