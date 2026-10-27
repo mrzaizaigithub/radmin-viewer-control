@@ -1,0 +1,32 @@
+name: install-test
+
+# Runs install.bat end to end on a clean Windows machine: downloads and
+# installs Radmin Viewer, copies RadminAuto.exe and registers radminauto://.
+on:
+  push:
+    paths:
+      - install.bat
+      - build.bat
+      - .github/workflows/install-test.yml
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: cmd
+        run: build.bat
+      - name: Run install.bat
+        shell: cmd
+        run: bin\install.bat /nopause
+      - name: Verify
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles(x86)%\Radmin Viewer 3\Radmin.exe" if not exist "%ProgramFiles%\Radmin Viewer 3\Radmin.exe" exit /b 1
+          if not exist "%LOCALAPPDATA%\RadminAuto\RadminAuto.exe" exit /b 1
+          reg query "HKCU\Software\Classes\radminauto\shell\open\command" || exit /b 1
+      - name: Run install.bat again (Radmin already installed)
+        shell: cmd
+        run: bin\install.bat /nopause

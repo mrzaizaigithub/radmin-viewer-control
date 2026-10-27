@@ -73,11 +73,25 @@ r = subprocess.run(["RadminAuto.exe", "192.168.1.10", "admin", "MatKhau123"])
 print("OK" if r.returncode == 0 else f"Loi {r.returncode}")
 ```
 
+## Cài cho máy mới: `install.bat`
+
+Để `install.bat` và `RadminAuto.exe` trong **cùng một thư mục** (file tải từ GitHub Actions đã có sẵn cả hai), sau đó double-click `install.bat`. Script làm 3 việc:
+
+1. **Cài Radmin Viewer** nếu máy chưa có. Nếu trong thư mục có sẵn file `Radmin_Viewer_*.msi` thì dùng file đó, nếu không thì tải từ `RADMIN_MSI_URL` (khai báo ở đầu file). Cài ở chế độ im lặng, Windows chỉ hỏi quyền Administrator cho riêng bước này.
+2. **Chép `RadminAuto.exe`** vào `%LOCALAPPDATA%\RadminAuto\`, một vị trí cố định nên không bị mất khi xóa thư mục Downloads.
+3. **Đăng ký link `radminauto://`** cho người dùng đang đăng nhập.
+
+Lưu ý:
+- Chạy bằng double-click bình thường, **không** chọn "Run as administrator". Link được đăng ký cho đúng tài khoản đang chạy script.
+- Có thể chạy lại bao nhiêu lần cũng được, ví dụ để cập nhật `RadminAuto.exe` lên bản mới. Nếu Radmin Viewer đã có thì script bỏ qua bước cài.
+- Khi triển khai tự động (logon script, GPO...), chạy `install.bat /nopause` để script không dừng lại chờ bấm phím ở cuối.
+- Nên tải sẵn file `.msi` từ trang chính thức https://www.radmin.com/download/, kiểm tra rồi để cạnh `install.bat`. Nếu Radmin đổi phiên bản hoặc đổi link tải, chỉ cần sửa `RADMIN_MSI_URL`.
+
 ## Mở bằng link trên web (`radminauto://`)
 
 Bấm một link trên trang web, RadminAuto sẽ mở Radmin và tự đăng nhập.
 
-**1. Đăng ký, chạy một lần trên mỗi máy** (không cần quyền admin):
+**1. Đăng ký, chạy một lần trên mỗi máy** (không cần quyền admin; `install.bat` đã làm sẵn bước này):
 
 ```bat
 RadminAuto.exe --register
@@ -136,7 +150,7 @@ RadminAuto.exe "radminauto://connect?host=192.168.11.242&user=remote&pass=remote
 build.bat
 ```
 
-File được tạo ra là `bin\RadminAuto.exe`.
+File được tạo ra là `bin\RadminAuto.exe`. `install.bat` cũng được chép vào `bin\`, nên có thể đem nguyên thư mục `bin\` đi cài cho máy khác.
 
 **Cách 2, GitHub Actions:** mỗi lần push, workflow `build` sẽ build trên Windows. Bạn tải `RadminAuto.exe` ở mục *Artifacts* của lần chạy đó.
 

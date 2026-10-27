@@ -11,4 +11,5 @@ cd /d "%~dp0"
 if not exist bin mkdir bin
 "%CSC%" /nologo /target:exe /platform:anycpu /optimize+ /out:bin\RadminAuto.exe src\RadminAuto.cs
 if errorlevel 1 exit /b 1
-echo Built bin\RadminAuto.exe
+copy /y install.bat bin\ >nul
+echo Built bin\RadminAuto.exe (+ bin\install.bat)

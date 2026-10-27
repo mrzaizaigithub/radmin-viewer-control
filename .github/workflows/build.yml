@@ -27,4 +27,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: RadminAuto
-          path: bin/RadminAuto.exe
+          path: |
+            bin/RadminAuto.exe
+            bin/install.bat
