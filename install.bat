@@ -3,8 +3,9 @@ rem ---------------------------------------------------------------------------
 rem  Cai Radmin Viewer (neu chua co) + cai va dang ky RadminAuto.exe
 rem
 rem  De file nay CUNG THU MUC voi RadminAuto.exe roi double-click.
-rem  Neu co san file Radmin_Viewer_*.msi trong thu muc nay thi dung file do,
-rem  khong thi tai tu RADMIN_MSI_URL ben duoi.
+rem  Neu trong thu muc nay co file .msi cai Radmin Viewer (ten co chu "radmin"
+rem  hoac "rview", khong phai Radmin Server) thi dung file do, khong can mang;
+rem  khong co thi tai tu RADMIN_MSI_URL ben duoi.
 rem
 rem  Chay binh thuong (KHONG chon "Run as administrator"): link radminauto://
 rem  duoc dang ky cho nguoi dung dang dang nhap; chi buoc cai Radmin moi hoi
@@ -25,8 +26,12 @@ call :find_radmin
 if defined RADMIN_EXE goto radmin_ok
 
 set "MSI="
-for %%F in ("%HERE%Radmin_Viewer*.msi") do set "MSI=%%~fF"
-if defined MSI goto have_msi
+for %%F in ("%HERE%*.msi") do call :consider_msi "%%~fF" "%%~nF"
+if not defined MSI goto download_msi
+echo       Dung file cai dat co san trong thu muc.
+goto have_msi
+
+:download_msi
 
 set "MSI=%TEMP%\Radmin_Viewer_setup.msi"
 echo       Dang tai Radmin Viewer: %RADMIN_MSI_URL%
@@ -93,6 +98,13 @@ goto end
 echo.
 echo LOI: Dang ky link radminauto:// khong thanh cong.
 goto end
+
+:consider_msi
+rem %1 = duong dan day du, %2 = ten file. Bo qua file khong phai Radmin Viewer.
+echo %~2| findstr /i "radmin rview" >nul || exit /b 0
+echo %~2| findstr /i "server" >nul && exit /b 0
+if not defined MSI set "MSI=%~1"
+exit /b 0
 
 :find_radmin
 set "RADMIN_EXE="

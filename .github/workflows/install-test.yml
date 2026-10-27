@@ -30,3 +30,34 @@ jobs:
       - name: Run install.bat again (Radmin already installed)
         shell: cmd
         run: bin\install.bat /nopause
+
+  # Installer placed next to install.bat (odd name, plus decoys) must be used without downloading.
+  local-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: cmd
+        run: build.bat
+      - name: Put installer and decoys next to install.bat
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing https://www.radmin.com/download/Radmin_Viewer_3.5.2.1_EN.msi -OutFile "bin/radmin viewer 3.5.msi"
+          Set-Content "bin/Radmin Server 3.5.msi" "decoy: must be skipped"
+          Set-Content "bin/other-app.msi" "decoy: must be skipped"
+      - name: Run install.bat (must not download)
+        shell: cmd
+        run: |
+          call bin\install.bat /nopause > install.log
+          set RC=%ERRORLEVEL%
+          type install.log
+          if not "%RC%"=="0" exit /b 1
+          findstr /c:"Dung file cai dat co san" install.log || exit /b 1
+          findstr /i /c:"radmin viewer 3.5.msi" install.log || exit /b 1
+          findstr /c:"Dang tai" install.log && exit /b 1
+          exit /b 0
+      - name: Verify
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles(x86)%\Radmin Viewer 3\Radmin.exe" if not exist "%ProgramFiles%\Radmin Viewer 3\Radmin.exe" exit /b 1
+          reg query "HKCU\Software\Classes\radminauto\shell\open\command" || exit /b 1

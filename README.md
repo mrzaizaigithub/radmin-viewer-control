@@ -77,7 +77,7 @@ print("OK" if r.returncode == 0 else f"Loi {r.returncode}")
 
 Để `install.bat` và `RadminAuto.exe` trong **cùng một thư mục** (file tải từ GitHub Actions đã có sẵn cả hai), sau đó double-click `install.bat`. Script làm 3 việc:
 
-1. **Cài Radmin Viewer** nếu máy chưa có. Nếu trong thư mục có sẵn file `Radmin_Viewer_*.msi` thì dùng file đó, nếu không thì tải từ `RADMIN_MSI_URL` (khai báo ở đầu file). Cài ở chế độ im lặng, Windows chỉ hỏi quyền Administrator cho riêng bước này.
+1. **Cài Radmin Viewer** nếu máy chưa có. Nếu trong thư mục có sẵn file `.msi` cài Radmin Viewer thì dùng file đó, không cần mạng. File được nhận nếu tên có chữ `radmin` hoặc `rview` và không có chữ `server`, ví dụ `Radmin_Viewer_3.5.2.1_EN.msi`, nếu không thì tải từ `RADMIN_MSI_URL` (khai báo ở đầu file). Cài ở chế độ im lặng, Windows chỉ hỏi quyền Administrator cho riêng bước này.
 2. **Chép `RadminAuto.exe`** vào `%LOCALAPPDATA%\RadminAuto\`, một vị trí cố định nên không bị mất khi xóa thư mục Downloads.
 3. **Đăng ký link `radminauto://`** cho người dùng đang đăng nhập.
 
